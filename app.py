@@ -1,134 +1,184 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
 
-# 1. Configuration & Historical Mapping
+# 1. SETUP & HISTORICAL DATA
 HISTORICAL_MAPPING = {
     "OKT72": "CZ", "OKT73": "DE", "OKT74": "CZ", "OKT75": "DE", 
     "OKT76": "DE", "OKT77": "CZ", "OKT78": "DE", "OKT79": "CZ", 
     "OKT80": "DE", "OKT81": "CZ", "OKT82": "DE", "OKT83": "DE", 
-    "OKT84": "CZ", "OKT85": "DE"
+    "OKT84": "CZ"
 }
 
-st.set_page_config(page_title="OKTAGON Insight Engine", layout="wide")
+st.set_page_config(page_title="OKTAGON Reports", layout="wide")
 
-# --- Helper Function to extract specific metrics from your summary layout ---
-def get_metric(df, question_text, answer_option, tournament_col):
+# Custom CSS for nice graphics
+st.markdown("""
+    <style>
+    .metric-card { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #ff4b4b; }
+    .plus-box { background-color: #d4edda; padding: 15px; border-radius: 5px; border-left: 5px solid #28a745; margin-bottom: 10px; }
+    .minus-box { background-color: #f8d7da; padding: 15px; border-radius: 5px; border-left: 5px solid #dc3545; margin-bottom: 10px; }
+    </style>
+    """, unsafe_content_label=True)
+
+# Helper function to clean numeric values from Excel strings
+def clean_val(val):
     try:
-        # Locate the row where Question matches and Answer Option matches
-        val = df[(df['Question'].str.contains(question_text, na=False, case=False)) & 
-                 (df['Answer Option'].str.contains(answer_option, na=False, case=False))][tournament_col].values[0]
-        return float(str(val).replace('%', '').replace(',', '.'))
+        if pd.isna(val) or val == "-": return 0.0
+        return float(str(val).replace('%', '').replace(',', '.').strip())
     except:
         return 0.0
 
-st.title("🥊 OKTAGON Tournament Report Generator")
+# --- SIDEBAR ---
+st.sidebar.header("Tournament Configuration")
+uploaded_file = st.sidebar.file_uploader("Upload Survey XLSX", type="xlsx")
 
-# --- Sidebar Configuration ---
-st.sidebar.header("Data Upload")
-uploaded_file = st.sidebar.file_uploader("Upload XLSX file", type="xlsx")
-
-new_tourn = st.sidebar.text_input("Add New Tournament (e.g., OKT86)")
-new_reg = st.sidebar.selectbox("Region of New Tournament", ["CZ", "DE"])
+new_tourn_name = st.sidebar.text_input("New Tournament Name", value="OKT85")
+new_tourn_region = st.sidebar.selectbox("New Tournament Region", ["DE", "CZ"])
 
 if uploaded_file:
     # Load Sheets
-    # Based on your paste, I'm assuming sheet names are 'TICKETING GENERAL' and 'TICKETING VIP'
-    try:
-        df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
-        df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
-    except:
-        st.error("Sheet names must be 'TICKETING GENERAL' and 'TICKETING VIP'")
-        st.stop()
+    df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
+    df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
 
-    # Update Mapping
+    # Mapping logic
     mapping = HISTORICAL_MAPPING.copy()
-    if new_tourn:
-        mapping[new_tourn] = new_reg
+    mapping[new_tourn_name] = new_tourn_region
 
-    # Identify all tournaments available in the file columns
-    all_cols = [c for c in df_gen.columns if "OKT" in str(c) and "Responses" not in str(c)]
+    # Identify Tournament Columns (Starting from Column D/Index 3 until "AVERAGE")
+    columns = list(df_gen.columns)
+    tourn_cols = []
+    for col in columns[3:]:
+        if "AVERAGE" in str(col).upper():
+            break
+        tourn_cols.append(col)
+
+    # --- TOURNAMENT SELECTION ---
+    selected_tour = st.sidebar.selectbox("Select Tournament for Detailed Report", tourn_cols, index=len(tourn_cols)-1)
+    focus_region = mapping.get(selected_tour, "CZ")
+
+    # --- DATA EXTRACTION LOGIC (Based on user-provided row references) ---
+    # Note: Excel Row 53 is Pandas Index 51 (assuming header is Row 1)
     
-    # --- 2. CALCULATE REGIONAL AVERAGES ---
-    cz_tours = [t for t, r in mapping.items() if r == "CZ" and t in all_cols]
-    de_tours = [t for t, r in mapping.items() if r == "DE" and t in all_cols]
-
-    def get_avg_for_region(tour_list):
-        sats = []
-        for t in tour_list:
-            # Get General Experience Rating
-            val = get_metric(df_gen, "overall experience", "Rating", t)
-            if val > 0: sats.append(val)
-        return np.mean(sats) if sats else 0
-
-    cz_avg = get_avg_for_region(cz_tours)
-    de_avg = get_avg_for_region(de_tours)
-
-    st.header("🌍 Regional Performance Benchmarks")
-    c1, c2 = st.columns(2)
-    c1.metric("CZ Average Satisfaction", f"{cz_avg:.2f} ★")
-    c2.metric("DE Average Satisfaction", f"{de_avg:.2f} ★")
+    # 1. Overall Satisfaction (General Row B53)
+    sat_row_idx = 51 
     
-    st.info(f"**Insight:** {'CZ' if cz_avg > de_avg else 'DE'} tournaments currently lead in fan satisfaction by {abs(cz_avg-de_avg):.2f} points.")
+    # 2. Catering (General Row B35, VIP Row B28)
+    cat_gen_idx = 33
+    cat_vip_idx = 26 
+
+    # 3. KPIs: Look for all rows labeled "Rating" in Column C
+    rating_rows = df_gen[df_gen.iloc[:, 2] == "Rating"].index.tolist()
+    
+    # --- CALCULATIONS ---
+    def get_regional_avg(df, row_idx, region_name):
+        vals = [clean_val(df.iloc[row_idx, columns.index(c)]) for c in tourn_cols if mapping.get(c) == region_name]
+        return sum(vals)/len(vals) if vals else 0
+
+    cz_avg_sat = get_regional_avg(df_gen, sat_row_idx, "CZ")
+    de_avg_sat = get_regional_avg(df_gen, sat_row_idx, "DE")
+    current_sat = clean_val(df_gen.iloc[sat_row_idx, columns.index(selected_tour)])
+    
+    # --- OUTPUT 1: BULLETPOINT REPORT ---
+    st.title(f"📊 Report: {selected_tour}")
+    
+    with st.expander("📝 Copy-Paste Presentation Bullets", expanded=True):
+        market_avg = cz_avg_sat if focus_region == "CZ" else de_avg_sat
+        diff = ((current_sat - market_avg) / market_avg) * 100 if market_avg != 0 else 0
+        
+        # KPI Analysis logic
+        kpi_results = []
+        for idx in rating_rows:
+            if idx == sat_row_idx: continue
+            q_name = df_gen.iloc[idx, 1]
+            score = clean_val(df_gen.iloc[idx, columns.index(selected_tour)])
+            reg_avg = get_regional_avg(df_gen, idx, focus_region)
+            kpi_results.append({'name': q_name, 'score': score, 'avg': reg_avg, 'diff': score - reg_avg})
+        
+        # Sort to find best 2
+        top_kpis = sorted(kpi_results, key=lambda x: x['score'], reverse=True)[:2]
+
+        report_text = f"""
+        **1. Overall Tournament Score**
+        • {selected_tour} Scored {current_sat:.2f}. 
+        • Comparison: This is {abs(diff):.1f}% {'above' if diff > 0 else 'below'} the {focus_region} market average ({market_avg:.2f}).
+
+        **2. Key Performance Indicators (KPIs)**
+        • {top_kpis[0]['name']}: {selected_tour} ({top_kpis[0]['score']:.2f}) vs {focus_region} Avg ({top_kpis[0]['avg']:.2f}).
+        • {top_kpis[1]['name']}: {selected_tour} ({top_kpis[1]['score']:.2f}) vs {focus_region} Avg ({top_kpis[1]['avg']:.2f}).
+
+        **3. Catering Analysis**
+        • General Catering: {clean_val(df_gen.iloc[cat_gen_idx, columns.index(selected_tour)]):.2f} ★
+        • VIP Catering: {clean_val(df_vip.iloc[cat_vip_idx, columns.index(selected_tour)]):.2f} ★
+        • Insight: VIP catering is performing {clean_val(df_vip.iloc[cat_vip_idx, columns.index(selected_tour)]) - clean_val(df_gen.iloc[cat_gen_idx, columns.index(selected_tour)]):.2f} points higher than General.
+        """
+        st.code(report_text, language=None)
 
     st.divider()
 
-    # --- 3. TOURNAMENT FOCUS ---
-    st.header("🎯 Tournament Focus Report")
-    selected_tour = st.selectbox("Select tournament for detailed report:", all_cols)
-
-    if selected_tour:
-        # Extract specific values for the selected tournament
-        # General Data
-        gen_sat = get_metric(df_gen, "overall experience", "Rating", selected_tour)
-        gen_cat = get_metric(df_gen, "catering / services", "Rating", selected_tour)
-        
-        # VIP Data
-        vip_sat = get_metric(df_vip, "Overall, how satisfied", "Average Rating", selected_tour)
-        vip_cat = get_metric(df_vip, "catering & refreshments", "Average Rating", selected_tour)
-
-        # A) 1-SLIDE PRESENTATION BULLETS
-        st.subheader("📋 Presentation Slide Bullets")
-        region = mapping.get(selected_tour, "Unknown")
-        reg_avg = cz_avg if region == "CZ" else de_avg
-        diff_vs_avg = gen_sat - reg_avg
-
-        bullet_points = f"""
-        • **Overall Event Rating:** {selected_tour} ({region}) achieved a {gen_sat}★ rating.
-        • **Market Context:** This is {'higher' if diff_vs_avg > 0 else 'lower'} than the {region} regional average of {reg_avg:.2f}.
-        • **VIP Experience:** VIP satisfaction stands at {vip_sat}★, showing a {vip_sat - gen_sat:.2f} delta from General Admission.
-        • **Catering Performance:** VIP catering ({vip_cat}★) vs. General catering ({gen_cat}★).
-        """
-        st.code(bullet_points, language=None)
-
-        # B) CATERING COMPARISON
-        st.subheader("🍴 Catering Analysis: General vs VIP")
-        cat_data = pd.DataFrame({
-            "Category": ["General Catering", "VIP Catering"],
-            "Score": [gen_cat, vip_cat]
+    # --- OUTPUT 2: GRAPHICS ---
+    
+    # ROW 1: Overall Satisfaction
+    st.header("1. Overall Tournament Score")
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        st.metric(label=f"{selected_tour} Score", value=f"{current_sat:.2f} / 5", delta=f"{diff:.1f}% vs {focus_region} Avg")
+    with col2:
+        # Comparison Graph
+        hist_data = pd.DataFrame({
+            'Tournament': [selected_tour, f'{focus_region} Average', 'Other Region Avg'],
+            'Score': [current_sat, market_avg, de_avg_sat if focus_region == "CZ" else cz_avg_sat]
         })
-        st.bar_chart(data=cat_data, x="Category", y="Score")
-        
-        # C) PLUS/MINUS SUMMARY (Based on the "Positives/Negatives" sections in your sheet)
-        st.subheader("📝 Structured Feedback Summary (Next Meeting)")
-        
-        # We extract the Top Positive and Top Negative rows from your sheet
-        try:
-            # Get the top % row under Positives and Negatives
-            pos_row = df_gen[df_gen['Section'] == 'Positives'].iloc[1:4] # Top 3 positives
-            neg_row = df_gen[df_gen['Section'] == 'Negatives'].iloc[1:4] # Top 3 negatives
-            
-            col_p, col_m = st.columns(2)
-            with col_p:
-                st.success("**STRENGTHS (+)**")
-                for _, row in pos_row.iterrows():
-                    st.write(f"• {row['Answer Option']} ({row[selected_tour]}%)")
-            with col_m:
-                st.error("**PAIN POINTS (-)**")
-                for _, row in neg_row.iterrows():
-                    st.write(f"• {row['Answer Option']} ({row[selected_tour]}%)")
-        except:
-            st.write("Feedback summary unavailable in this sheet format.")
+        fig_sat = px.bar(hist_data, x='Tournament', y='Score', color='Tournament', text_auto=True, height=300)
+        st.plotly_chart(fig_sat, use_container_width=True)
+
+    # ROW 2: KPIs
+    st.header("2. Key Performance Indicators")
+    k1, k2 = st.columns(2)
+    for i, col in enumerate([k1, k2]):
+        with col:
+            st.markdown(f"""<div class='metric-card'>
+                <h4>🏆 {top_kpis[i]['name']}</h4>
+                <h2 style='color:#ff4b4b;'>{top_kpis[i]['score']:.2f}</h2>
+                <p>Regional Avg: {top_kpis[i]['avg']:.2f}</p>
+                </div>""", unsafe_allow_html=True)
+
+    # ROW 3: FeedBack (Plus/Minus)
+    st.header("3. Feedback Summary (General)")
+    pos_idx = 58 # Excel B59
+    neg_idx = 68 # Excel B69
+    
+    c_plus, c_minus = st.columns(2)
+    with c_plus:
+        st.subheader("(+) Positives")
+        # Extract next 5 rows of answers
+        for i in range(1, 6):
+            ans = df_gen.iloc[pos_idx + i, 2]
+            val = df_gen.iloc[pos_idx + i, columns.index(selected_tour)]
+            if pd.notna(ans) and clean_val(val) > 0:
+                st.markdown(f"<div class='plus-box'><b>{val}%</b> - {ans}</div>", unsafe_allow_html=True)
+
+    with c_minus:
+        st.subheader("(-) Negatives")
+        for i in range(1, 6):
+            ans = df_gen.iloc[neg_idx + i, 2]
+            val = df_gen.iloc[neg_idx + i, columns.index(selected_tour)]
+            if pd.notna(ans) and clean_val(val) > 0:
+                st.markdown(f"<div class='minus-box'><b>{val}%</b> - {ans}</div>", unsafe_allow_html=True)
+
+    # ROW 4: Catering
+    st.header("4. Catering Analysis")
+    cat_g = clean_val(df_gen.iloc[cat_gen_idx, columns.index(selected_tour)])
+    cat_v = clean_val(df_vip.iloc[cat_vip_idx, columns.index(selected_tour)])
+    
+    fig_cat = go.Figure(data=[
+        go.Bar(name='General', x=[selected_tour], y=[cat_g], marker_color='#333'),
+        go.Bar(name='VIP', x=[selected_tour], y=[cat_v], marker_color='#ff4b4b'),
+        go.Bar(name=f'{focus_region} Gen Avg', x=[selected_tour], y=[get_regional_avg(df_gen, cat_gen_idx, focus_region)], marker_color='#999')
+    ])
+    fig_cat.update_layout(barmode='group', height=400)
+    st.plotly_chart(fig_cat, use_container_width=True)
 
 else:
-    st.info("Upload the survey results to begin.")
+    st.warning("Please upload the tournament survey file to generate the report.")
