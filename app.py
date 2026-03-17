@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import google.generativeai as genai
+from groq import Groq
 
 # 1. HARDCODED HISTORICAL DATA
 HISTORICAL_MAPPING = {
@@ -16,9 +16,9 @@ OKT_YELLOW = "#FFCC00"
 OKT_BLACK = "#000000"
 OKT_WHITE = "#FFFFFF"
 
-st.set_page_config(page_title="OKTAGON AI Insights", layout="wide")
+st.set_page_config(page_title="OKTAGON Groq Insights", layout="wide")
 
-# CSS FOR OKTAGON BRANDING (LIGHTER FONTS)
+# PROFESSIONAL CSS (INTER FONT, CLEAN WEIGHTS)
 st.markdown(f"""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
@@ -29,11 +29,10 @@ st.markdown(f"""
         font-family: 'Inter', sans-serif;
     }}
     
-    /* Headers - Less bold than before */
     h1, h2, h3 {{ 
         color: {OKT_WHITE} !important; 
-        font-weight: 600 !important; 
-        letter-spacing: -0.5px;
+        font-weight: 600 !important;
+        margin-bottom: 20px;
     }}
     
     p, span, label, div {{ 
@@ -51,37 +50,39 @@ st.markdown(f"""
     .plus-box {{ 
         background-color: #28a745; 
         color: white !important; 
-        padding: 10px; 
-        border-radius: 6px; 
-        margin-bottom: 8px; 
+        padding: 12px; 
+        border-radius: 8px; 
+        margin-bottom: 10px; 
+        border: 1px solid #1e7e34;
         font-size: 14px;
     }}
     
     .minus-box {{ 
         background-color: #dc3545; 
         color: white !important; 
-        padding: 10px; 
-        border-radius: 6px; 
-        margin-bottom: 8px; 
+        padding: 12px; 
+        border-radius: 8px; 
+        margin-bottom: 10px; 
+        border: 1px solid #a71d2a;
         font-size: 14px;
     }}
     
     .kpi-card {{ 
         background-color: #111; 
-        padding: 20px; 
-        border-radius: 12px; 
-        border-top: 3px solid {OKT_YELLOW}; 
+        padding: 25px; 
+        border-radius: 15px; 
+        border-top: 4px solid {OKT_YELLOW}; 
         margin-bottom: 20px;
     }}
     
     .report-container {{ 
         background-color: #0c0c0c; 
-        padding: 25px; 
+        padding: 30px; 
         border: 1px solid {OKT_YELLOW}; 
-        border-radius: 8px; 
-        line-height: 1.6; 
-        color: #ddd !important;
-        font-size: 15px;
+        border-radius: 10px; 
+        line-height: 1.7; 
+        color: #efefef !important;
+        font-size: 16px;
     }}
     
     .stSelectbox label, .stTextInput label {{ 
@@ -91,6 +92,7 @@ st.markdown(f"""
     </style>
     """, unsafe_allow_html=True)
 
+# --- UTILITIES ---
 def clean_val(val):
     try:
         if pd.isna(val) or val == "-" or val == "–": return 0.0
@@ -104,38 +106,40 @@ def get_regional_avg(df, row_idx, region_name, tourn_cols, mapping):
     return sum(vals)/len(vals) if vals else 0
 
 # --- SIDEBAR ---
-st.sidebar.image("https://oktagonmma.com/wp-content/uploads/2022/07/logo-oktagon-white.png", width=160)
-st.sidebar.title("Configuration")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-
-# Fixed model names to avoid 404
-model_choice = st.sidebar.selectbox("AI Version", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"])
-
-uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
+st.sidebar.image("https://oktagonmma.com/wp-content/uploads/2022/07/logo-oktagon-white.png", width=170)
+st.sidebar.title("Groq Setup")
+groq_key = st.sidebar.text_input("Groq API Key", type="password", help="Get it from console.groq.com")
+uploaded_file = st.sidebar.file_uploader("Upload .xlsx file", type="xlsx")
 
 if uploaded_file:
+    # 1. Load Data
     df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
     df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
 
+    # 2. Auto-Detect Columns
     all_cols = list(df_gen.columns)
     avg_index = next((i for i, col in enumerate(all_cols) if "AVERAGE" in str(col).upper()), len(all_cols))
     tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(c)]
     
+    # Newest Tournament Logic
     newest_tourn = tourn_cols[-1]
     new_tourn_reg = st.sidebar.selectbox(f"Region for {newest_tourn}", ["CZ", "DE"])
     mapping = HISTORICAL_MAPPING.copy()
     mapping[newest_tourn] = new_tourn_reg
 
+    # Select focus
     selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
-    # Data Coordinates
+    # Coordinates
     row_sat, row_cat_g, row_cat_v, row_pos, row_neg = 51, 33, 26, 58, 68
+
+    # Scoring & Averages
     cz_avg_sat = get_regional_avg(df_gen, row_sat, "CZ", tourn_cols, mapping)
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
     current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
 
-    # KPI Selection (Logic: Highest Deviation from Region Avg)
+    # KPI logic (Deviation from regional average)
     rating_rows = df_gen[df_gen.iloc[:, 2].str.contains("Rating", na=False, case=False)].index.tolist()
     kpis = []
     for idx in rating_rows:
@@ -143,82 +147,94 @@ if uploaded_file:
         score = clean_val(df_gen.iloc[idx, df_gen.columns.get_loc(selected_tour)])
         reg_avg = get_regional_avg(df_gen, idx, focus_region, tourn_cols, mapping)
         if score > 0:
-            kpis.append({'name': df_gen.iloc[idx, 1], 'score': score, 'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 'dev': abs(score - reg_avg)})
+            kpis.append({
+                'name': df_gen.iloc[idx, 1], 
+                'score': score, 
+                'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 
+                'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 
+                'dev': abs(score - reg_avg)
+            })
     top_kpis = sorted(kpis, key=lambda x: x['dev'], reverse=True)[:2]
 
-    # --- 3. AI PRESENTATION BULLETS ---
-    st.header(f"🥊 Market Insights: {selected_tour}")
+    # --- 3. GROQ AI REPORT ---
+    st.header(f"🥊 Market Analysis: {selected_tour}")
 
-    if gemini_key:
+    if groq_key:
         try:
-            genai.configure(api_key=gemini_key)
-            # IMPORTANT: Using standard model name without 'models/' prefix inside GenerativeModel
-            model = genai.GenerativeModel(model_name=model_choice)
+            client = Groq(api_key=groq_key)
             
             pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             neg_data = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             
             prompt = f"""
-            You are an OKTAGON MMA business analyst. Generate a complex presentation report for {selected_tour} ({focus_region}).
+            You are a senior business analyst for OKTAGON MMA. Generate a high-level presentation report for {selected_tour} ({focus_region}).
             
-            - Overall Score: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
-            - Key Deviations: {top_kpis[0]['name']} at {top_kpis[0]['score']}, {top_kpis[1]['name']} at {top_kpis[1]['score']}
+            DATA CONTEXT:
+            - Overall Sat: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
+            - KPI focus: {top_kpis[0]['name']} ({top_kpis[0]['score']}) and {top_kpis[1]['name']} ({top_kpis[1]['score']})
+            - Catering: Gen ({clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}), VIP ({clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])})
             - Positives: {pos_data}
             - Negatives: {neg_data}
-            - Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
-            
-            Requirements:
-            1. Title: OKTAGON Market Insight: CZ vs. DE Performance
-            2. Detailed section for Key Performance Indicators (KPIs).
-            3. Feedback Summary (+/-) using the percentage data.
-            4. Catering Comparison (General vs VIP) with market insight.
-            Use professional language. Do not use bold for everything.
+
+            STRUCTURE:
+            1. OKTAGON Market Insight: CZ vs. DE Performance
+            2. Key Performance Indicators (KPIs) with regional benchmarks.
+            3. {selected_tour} Feedback Summary (+/-)
+            4. Catering Result Comparison (General vs VIP)
             """
-            with st.spinner(f"Analyzing via {model_choice}..."):
-                response = model.generate_content(prompt)
-                st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
+
+            with st.spinner("Groq AI is crunching the numbers..."):
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "You are a professional MMA market researcher. Provide clear, data-driven executive summaries."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model="llama-3.3-70b-versatile",
+                )
+                st.markdown(f"<div class='report-container'>{chat_completion.choices[0].message.content}</div>", unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"AI Connection Error: {e}")
-            st.info("Ensure your API key is correct and you have set up a project in Google AI Studio.")
+            st.error(f"Groq API Error: {e}")
+    else:
+        st.warning("⚠️ Please enter your Groq API Key in the sidebar.")
 
     st.divider()
 
-    # --- 4. GRAPHICS (CLEANER FONTS) ---
+    # --- 4. GRAPHICS ---
     st.header("🏆 Performance Benchmarks")
     k1, k2 = st.columns(2)
     for i, k_col in enumerate([k1, k2]):
         with k_col:
             st.markdown(f"""
                 <div class='kpi-card'>
-                    <p style='color:{OKT_YELLOW}; font-weight:600; margin:0;'>{top_kpis[i]['name']}</p>
-                    <h1 style='color:white; margin:10px 0;'>{top_kpis[i]['score']:.2f}</h1>
-                    <p style='color:#888; font-size:13px;'>CZ Market: {top_kpis[i]['avg_cz']:.2f} | DE Market: {top_kpis[i]['avg_de']:.2f}</p>
+                    <p style='color:{OKT_YELLOW}; font-weight:600; margin-bottom:5px;'>{top_kpis[i]['name']}</p>
+                    <h1 style='color:white; margin:0;'>{top_kpis[i]['score']:.2f}</h1>
+                    <p style='color:#777; font-size:13px; margin-top:10px;'>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p>
                 </div>
             """, unsafe_allow_html=True)
 
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("Satisfaction: Market Context")
+        st.subheader("Market Index: Overall Satisfaction")
         fig_m = go.Figure(data=[
             go.Bar(name='This Event', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW),
-            go.Bar(name='CZ Average', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
-            go.Bar(name='DE Average', x=[selected_tour], y=[de_avg_sat], marker_color='#555')
+            go.Bar(name='CZ Average', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFFFFF'),
+            go.Bar(name='DE Average', x=[selected_tour], y=[de_avg_sat], marker_color='#555555')
         ])
-        fig_m.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', barmode='group', font=dict(family="Inter"))
+        fig_m.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', barmode='group')
         st.plotly_chart(fig_m, use_container_width=True)
 
     with g2:
-        st.subheader("Catering Result Comparison")
+        st.subheader("Catering: General vs VIP")
         cg = clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])
         cv = clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])
         fig_c = go.Figure(data=[
             go.Bar(name='General', x=['Catering'], y=[cg], marker_color=OKT_YELLOW, text=[cg], textposition='auto'),
             go.Bar(name='VIP', x=['Catering'], y=[cv], marker_color='#FFF', text=[cv], textposition='auto')
         ])
-        fig_c.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis_range=[0,5], font=dict(family="Inter"))
+        fig_c.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis_range=[0,5])
         st.plotly_chart(fig_c, use_container_width=True)
 
-    st.header("📝 Qualitative Feedback Summary")
+    st.header("📝 Fan Feedback")
     f_p, f_m = st.columns(2)
     with f_p:
         st.markdown(f"<p style='color:#28a745; font-weight:600;'>Positives (+)</p>", unsafe_allow_html=True)
@@ -232,5 +248,5 @@ if uploaded_file:
             if clean_val(val) > 0: st.markdown(f"<div class='minus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
 
 else:
-    st.title("🥊 OKTAGON MMA AI Analyst")
-    st.info("Upload the survey results .xlsx file in the sidebar to begin.")
+    st.title("🥊 OKTAGON MMA: AI Survey Analyst")
+    st.info("Upload the survey .xlsx file to begin analysis.")
