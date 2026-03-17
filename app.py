@@ -18,16 +18,17 @@ OKT_WHITE = "#FFFFFF"
 
 st.set_page_config(page_title="OKTAGON AI Insights", layout="wide")
 
-# CSS FOR OKTAGON BRANDING
+# OKTAGON BRANDED CSS
 st.markdown(f"""
     <style>
     .stApp {{ background-color: {OKT_BLACK}; color: {OKT_WHITE}; }}
-    h1, h2, h3, h4, p, span, label, div {{ color: {OKT_WHITE} !important; font-family: 'Arial Black', sans-serif; }}
+    h1, h2, h3, h4, p, span, label, div {{ color: {OKT_WHITE} !important; font-family: 'Impact', sans-serif; }}
     .stMetric {{ background-color: #111; padding: 15px; border-radius: 10px; border: 1px solid {OKT_YELLOW}; }}
     .plus-box {{ background-color: #28a745; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #1e7e34; }}
     .minus-box {{ background-color: #dc3545; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #a71d2a; }}
     .kpi-card {{ background-color: #111; padding: 20px; border-radius: 15px; border-top: 4px solid {OKT_YELLOW}; margin-bottom: 20px; border-left: 1px solid #333; border-right: 1px solid #333; }}
-    .report-container {{ background-color: #111; padding: 25px; border: 2px solid {OKT_YELLOW}; border-radius: 10px; line-height: 1.6; color: white !important; }}
+    .report-container {{ background-color: #111; padding: 25px; border: 2px solid {OKT_YELLOW}; border-radius: 10px; line-height: 1.8; color: {OKT_WHITE} !important; }}
+    .stSelectbox label, .stTextInput label {{ color: {OKT_YELLOW} !important; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -52,35 +53,50 @@ st.sidebar.title("Config")
 gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
 uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
 
+# --- MODEL DISCOVERY LOGIC ---
+working_model_name = None
+if gemini_key:
+    try:
+        genai.configure(api_key=gemini_key)
+        # Search for any model that supports generating content
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # Priority order for OKTAGON analysis
+        targets = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
+        for t in targets:
+            if t in available_models:
+                working_model_name = t
+                break
+        
+        if working_model_name:
+            st.sidebar.success(f"Connected: {working_model_name}")
+        else:
+            st.sidebar.error("Key active, but no Gemini models found. Check Google AI Studio permissions.")
+    except Exception as e:
+        st.sidebar.error(f"Connection Failed: {e}")
+
 if uploaded_file:
     df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
     df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
 
-    # Column Detection Logic
     all_cols = list(df_gen.columns)
     avg_index = next((i for i, col in enumerate(all_cols) if "AVERAGE" in str(col).upper()), len(all_cols))
     tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(c)]
     
-    # 1. New Tournament Setup
     newest_tourn = tourn_cols[-1]
     new_tourn_reg = st.sidebar.selectbox(f"Region for {newest_tourn}", ["CZ", "DE"])
-
     mapping = HISTORICAL_MAPPING.copy()
     mapping[newest_tourn] = new_tourn_reg
 
-    # Select focus
     selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
-    # Data Coordinates
     row_sat, row_cat_g, row_cat_v, row_pos, row_neg = 51, 33, 26, 58, 68
-
-    # Scoring
     cz_avg_sat = get_regional_avg(df_gen, row_sat, "CZ", tourn_cols, mapping)
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
     current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
 
-    # KPI logic
+    # KPI Deviation
     rating_rows = df_gen[df_gen.iloc[:, 2].str.contains("Rating", na=False, case=False)].index.tolist()
     kpis = []
     for idx in rating_rows:
@@ -91,67 +107,51 @@ if uploaded_file:
             kpis.append({'name': df_gen.iloc[idx, 1], 'score': score, 'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 'dev': abs(score - reg_avg)})
     top_kpis = sorted(kpis, key=lambda x: x['dev'], reverse=True)[:2]
 
-    # --- 3. PRESENTATION BULLETS (GEMINI WITH FALLBACK) ---
+    # --- AI ANALYSIS ---
     st.header(f"🥊 {selected_tour} Market Insights")
 
-    if gemini_key:
+    if working_model_name:
         try:
-            genai.configure(api_key=gemini_key)
-            
-            # ATTEMPT FALLBACK CHAIN
-            model_names = ['gemini-1.5-flash', 'gemini-pro', 'gemini-1.5-pro']
-            response_text = None
-            
+            model = genai.GenerativeModel(working_model_name)
             pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             neg_data = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             
             prompt = f"""
-            Act as an OKTAGON MMA Market Analyst. Create an executive presentation report for {selected_tour} ({focus_region}).
-            1. Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
-            2. KPI Focus: {top_kpis[0]['name']} ({top_kpis[0]['score']}) and {top_kpis[1]['name']} ({top_kpis[1]['score']})
-            3. Feedback Positives: {pos_data}
-            4. Feedback Negatives: {neg_data}
-            5. Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
-            """
-
-            for m_name in model_names:
-                try:
-                    model = genai.GenerativeModel(m_name)
-                    with st.spinner(f"AI analyzing using {m_name}..."):
-                        response = model.generate_content(prompt)
-                        response_text = response.text
-                        break # Success!
-                except:
-                    continue # Try next model
+            Act as an OKTAGON MMA analyst. Generate a professional report for {selected_tour} ({focus_region}).
+            Market Context:
+            - Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
+            - KPI 1: {top_kpis[0]['name']} ({top_kpis[0]['score']})
+            - KPI 2: {top_kpis[1]['name']} ({top_kpis[1]['score']})
+            - Positives: {pos_data}
+            - Negatives: {neg_data}
+            - Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
             
-            if response_text:
-                st.markdown(f"<div class='report-container'>{response_text}</div>", unsafe_allow_html=True)
-            else:
-                st.error("AI could not find a supported model. Please check your API key and region permissions.")
-                
+            Format as:
+            1. Market Insight: CZ vs DE Performance
+            2. Key Indicators (KPIs)
+            3. Feedback Summary (+/-)
+            4. Catering Analysis
+            """
+            with st.spinner("AI analyzing tournament data..."):
+                response = model.generate_content(prompt)
+                st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"AI Connection Error: {e}")
+            st.error(f"AI Generation Error: {e}")
     else:
-        st.warning("⚠️ Enter Gemini API Key in sidebar for AI Analysis.")
+        st.warning("⚠️ Enter a valid Gemini API Key. If you have one, ensure it has Gemini 1.5 permissions in AI Studio.")
 
     st.divider()
 
-    # --- 4. GRAPHICS ---
+    # --- GRAPHICS ---
     st.header("🏆 Performance Benchmarks")
     k1, k2 = st.columns(2)
     for i, k_col in enumerate([k1, k2]):
         with k_col:
-            st.markdown(f"""
-                <div class='kpi-card'>
-                    <h4 style='color:{OKT_YELLOW}; margin:0;'>{top_kpis[i]['name']}</h4>
-                    <h1 style='color:white; font-size:45px; margin:10px 0;'>{top_kpis[i]['score']:.2f}</h1>
-                    <p style='color:#888; margin:0;'>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"<div class='kpi-card'><h4 style='color:{OKT_YELLOW};'>{top_kpis[i]['name']}</h4><h1 style='color:white; font-size:45px;'>{top_kpis[i]['score']:.2f}</h1><p>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p></div>", unsafe_allow_html=True)
 
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("Market Index: Overall Satisfaction")
+        st.subheader("Market Comparison: Satisfaction")
         fig_m = go.Figure(data=[
             go.Bar(name='Event', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW, text=[f"{current_sat:.2f}"], textposition='auto'),
             go.Bar(name='CZ Avg', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
