@@ -18,7 +18,7 @@ OKT_WHITE = "#FFFFFF"
 
 st.set_page_config(page_title="OKTAGON AI Insights", layout="wide")
 
-# OKTAGON BRANDED CSS
+# CSS FOR OKTAGON BRANDING
 st.markdown(f"""
     <style>
     .stApp {{ background-color: {OKT_BLACK}; color: {OKT_WHITE}; }}
@@ -51,29 +51,11 @@ def get_regional_avg(df, row_idx, region_name, tourn_cols, mapping):
 st.sidebar.image("https://oktagonmma.com/wp-content/uploads/2022/07/logo-oktagon-white.png", width=180)
 st.sidebar.title("Config")
 gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
 
-# --- MODEL DISCOVERY LOGIC ---
-working_model_name = None
-if gemini_key:
-    try:
-        genai.configure(api_key=gemini_key)
-        # Search for any model that supports generating content
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # Priority order for OKTAGON analysis
-        targets = ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']
-        for t in targets:
-            if t in available_models:
-                working_model_name = t
-                break
-        
-        if working_model_name:
-            st.sidebar.success(f"Connected: {working_model_name}")
-        else:
-            st.sidebar.error("Key active, but no Gemini models found. Check Google AI Studio permissions.")
-    except Exception as e:
-        st.sidebar.error(f"Connection Failed: {e}")
+# Manual Model Selection to bypass "ListModels" error
+model_choice = st.sidebar.selectbox("AI Model Version", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"])
+
+uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
 
 if uploaded_file:
     df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
@@ -96,7 +78,7 @@ if uploaded_file:
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
     current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
 
-    # KPI Deviation
+    # KPI logic
     rating_rows = df_gen[df_gen.iloc[:, 2].str.contains("Rating", na=False, case=False)].index.tolist()
     kpis = []
     for idx in rating_rows:
@@ -107,19 +89,21 @@ if uploaded_file:
             kpis.append({'name': df_gen.iloc[idx, 1], 'score': score, 'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 'dev': abs(score - reg_avg)})
     top_kpis = sorted(kpis, key=lambda x: x['dev'], reverse=True)[:2]
 
-    # --- AI ANALYSIS ---
+    # --- AI REPORT SECTION ---
     st.header(f"🥊 {selected_tour} Market Insights")
 
-    if working_model_name:
+    if gemini_key:
         try:
-            model = genai.GenerativeModel(working_model_name)
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel(model_choice)
+            
             pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             neg_data = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             
             prompt = f"""
             Act as an OKTAGON MMA analyst. Generate a professional report for {selected_tour} ({focus_region}).
             Market Context:
-            - Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
+            - Overall Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
             - KPI 1: {top_kpis[0]['name']} ({top_kpis[0]['score']})
             - KPI 2: {top_kpis[1]['name']} ({top_kpis[1]['score']})
             - Positives: {pos_data}
@@ -127,18 +111,17 @@ if uploaded_file:
             - Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
             
             Format as:
-            1. Market Insight: CZ vs DE Performance
-            2. Key Indicators (KPIs)
+            1. Market Insight: CZ vs DE Performance (With satisfaction averages)
+            2. Key Performance Indicators (KPIs)
             3. Feedback Summary (+/-)
-            4. Catering Analysis
+            4. Catering Result Comparison (Gen vs VIP)
             """
-            with st.spinner("AI analyzing tournament data..."):
+            with st.spinner(f"AI ({model_choice}) analyzing data..."):
                 response = model.generate_content(prompt)
                 st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
         except Exception as e:
-            st.error(f"AI Generation Error: {e}")
-    else:
-        st.warning("⚠️ Enter a valid Gemini API Key. If you have one, ensure it has Gemini 1.5 permissions in AI Studio.")
+            st.error(f"AI could not generate report: {e}")
+            st.info("The charts below still show the raw data from your file.")
 
     st.divider()
 
