@@ -4,7 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import google.generativeai as genai
 
-# 1. HARDCODED HISTORICAL DATA
+# 1. HISTORICAL DATA
 HISTORICAL_MAPPING = {
     "OKT72": "CZ", "OKT73": "DE", "OKT74": "CZ", "OKT75": "DE", 
     "OKT76": "DE", "OKT77": "CZ", "OKT78": "DE", "OKT79": "CZ", 
@@ -18,16 +18,16 @@ OKT_WHITE = "#FFFFFF"
 
 st.set_page_config(page_title="OKTAGON AI Insights", layout="wide")
 
-# OKTAGON STYLING
+# CSS FOR BLACK & GOLD THEME
 st.markdown(f"""
     <style>
     .stApp {{ background-color: {OKT_BLACK}; color: {OKT_WHITE}; }}
-    h1, h2, h3, p, span, label, div {{ color: {OKT_WHITE} !important; font-family: 'Arial Black', sans-serif; }}
+    h1, h2, h3, p, span, label, div {{ color: {OKT_WHITE} !important; font-family: 'Arial', sans-serif; }}
     .stMetric {{ background-color: #111; padding: 15px; border-radius: 10px; border: 1px solid {OKT_YELLOW}; }}
     .plus-box {{ background-color: #28a745; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #1e7e34; }}
     .minus-box {{ background-color: #dc3545; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #a71d2a; }}
     .kpi-card {{ background-color: #111; padding: 20px; border-radius: 15px; border-top: 4px solid {OKT_YELLOW}; margin-bottom: 20px; }}
-    .report-container {{ background-color: #111; padding: 25px; border: 1px solid {OKT_YELLOW}; border-radius: 10px; color: {OKT_WHITE} !important; }}
+    .report-container {{ background-color: #111; padding: 25px; border: 1px solid {OKT_YELLOW}; border-radius: 10px; line-height: 1.6; }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -47,13 +47,30 @@ def get_regional_avg(df, row_idx, region_name, tourn_cols, mapping):
 st.sidebar.image("https://oktagonmma.com/wp-content/uploads/2022/07/logo-oktagon-white.png", width=180)
 st.sidebar.title("Configuration")
 gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+
+# Model Discovery Logic
+available_model = None
+if gemini_key:
+    try:
+        genai.configure(api_key=gemini_key)
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Preference order
+        for target in ['models/gemini-1.5-flash', 'models/gemini-1.5-pro', 'models/gemini-pro']:
+            if target in models:
+                available_model = target
+                break
+        if available_model:
+            st.sidebar.success(f"Connected: {available_model.split('/')[-1]}")
+    except Exception as e:
+        st.sidebar.error("Could not verify API Key")
+
 uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
 
 if uploaded_file:
     df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
     df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
 
-    # Auto-detect newest tournament (column before AVERAGE)
+    # Detect newest tournament
     all_cols = list(df_gen.columns)
     avg_index = next((i for i, col in enumerate(all_cols) if "AVERAGE" in str(col).upper()), len(all_cols))
     tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(c)]
@@ -67,121 +84,10 @@ if uploaded_file:
     selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
-    # Data Points
-    row_sat = 51   # Overall Sat (B53)
-    row_cat_g = 33 # Gen Catering (B35)
-    row_cat_v = 26 # VIP Catering (B28)
-    row_pos = 58   # Positives (B60)
-    row_neg = 68   # Negatives (B70)
+    # Excel Row Indexing
+    row_sat, row_cat_g, row_cat_v, row_pos, row_neg = 51, 33, 26, 58, 68
 
-    # Core Stats
+    # Stats
     cz_avg_sat = get_regional_avg(df_gen, row_sat, "CZ", tourn_cols, mapping)
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
-    current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
-
-    # KPI Deviation Logic
-    rating_rows = df_gen[df_gen.iloc[:, 2].str.contains("Rating", na=False, case=False)].index.tolist()
-    kpi_candidates = []
-    for idx in rating_rows:
-        if idx == row_sat: continue
-        score = clean_val(df_gen.iloc[idx, df_gen.columns.get_loc(selected_tour)])
-        reg_avg = get_regional_avg(df_gen, idx, focus_region, tourn_cols, mapping)
-        if score > 0:
-            kpi_candidates.append({
-                'name': df_gen.iloc[idx, 1],
-                'score': score,
-                'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping),
-                'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping),
-                'deviation': abs(score - reg_avg)
-            })
-    
-    top_kpis = sorted(kpi_candidates, key=lambda x: x['deviation'], reverse=True)[:2]
-
-    # --- GEMINI AI REPORT ---
-    st.header(f"🥊 OKTAGON Insights: {selected_tour}")
-
-    if gemini_key:
-        try:
-            genai.configure(api_key=gemini_key)
-            # Try 1.5-flash with full path, fallback to 1.0 Pro if needed
-            model_name = 'models/gemini-1.5-flash'
-            model = genai.GenerativeModel(model_name)
-            
-            pos_list = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
-            neg_list = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
-            
-            prompt = f"""
-            You are a professional MMA Market Analyst for OKTAGON. Create a complex presentation report for {selected_tour} in {focus_region}.
-            Use this exact layout:
-            1. OKTAGON Market Insight: CZ vs. DE Performance
-               - Compare satisfaction scores ({current_sat}) against CZ ({cz_avg_sat:.2f}) and DE ({de_avg_sat:.2f}) averages.
-            2. Key Performance Indicators (KPIs):
-               - Analyze {top_kpis[0]['name']} and {top_kpis[1]['name']} against regional standards.
-            3. {selected_tour} Feedback Summary (+/-):
-               - Use these Positives: {pos_list}
-               - Use these Negatives: {neg_list}
-            4. Catering Result Comparison (General vs VIP):
-               - General: {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}
-               - VIP: {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
-            """
-            
-            with st.spinner("AI Generating Report..."):
-                response = model.generate_content(prompt)
-                st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
-        
-        except Exception as e:
-            st.error(f"Gemini API Error: {e}. Check key or try 'models/gemini-pro'.")
-
-    st.divider()
-
-    # --- GRAPHICS (OKTAGON YELLOW/BLACK) ---
-    st.header("🏆 Performance Benchmark")
-    k1, k2 = st.columns(2)
-    for i, k_col in enumerate([k1, k2]):
-        with k_col:
-            st.markdown(f"""<div class='kpi-card'>
-                <h3 style='color:{OKT_YELLOW}; margin:0;'>{top_kpis[i]['name']}</h3>
-                <h1 style='color:white; font-size:50px;'>{top_kpis[i]['score']:.2f}</h1>
-                <p>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p>
-            </div>""", unsafe_allow_html=True)
-
-    g1, g2 = st.columns(2)
-    with g1:
-        st.subheader("Market Index: Overall Satisfaction")
-        fig_m = go.Figure(data=[
-            go.Bar(name='Event', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW),
-            go.Bar(name='CZ Market', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFFFFF'),
-            go.Bar(name='DE Market', x=[selected_tour], y=[de_avg_sat], marker_color='#666')
-        ])
-        fig_m.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_m, use_container_width=True)
-
-    with g2:
-        st.subheader("Catering Gap (Gen vs VIP)")
-        c_g = clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])
-        c_v = clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])
-        fig_c = go.Figure(data=[
-            go.Bar(name='General', x=['Catering'], y=[c_g], marker_color=OKT_YELLOW, text=[f"{c_g}"], textposition='auto'),
-            go.Bar(name='VIP', x=['Catering'], y=[c_v], marker_color=OKT_WHITE, text=[f"{c_v}"], textposition='auto')
-        ])
-        fig_c.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig_c, use_container_width=True)
-
-    f_p, f_m = st.columns(2)
-    with f_p:
-        st.markdown(f"<h3 style='color:#28a745'>Positives (+)</h3>", unsafe_allow_html=True)
-        for i in range(1, 7):
-            ans = df_gen.iloc[row_pos+i, 2]
-            val = df_gen.iloc[row_pos+i, df_gen.columns.get_loc(selected_tour)]
-            if clean_val(val) > 0: st.markdown(f"<div class='plus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
-    
-    with f_m:
-        st.markdown(f"<h3 style='color:#dc3545'>Negatives (-)</h3>", unsafe_allow_html=True)
-        for i in range(1, 7):
-            ans = df_gen.iloc[row_neg+i, 2]
-            val = df_gen.iloc[row_neg+i, df_gen.columns.get_loc(selected_tour)]
-            if clean_val(val) > 0: st.markdown(f"<div class='minus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
-
-else:
-    st.title("🥊 OKTAGON MMA: AI Analyst")
-    st.info("Upload the survey Excel to begin analysis.")
+    current_sat = clean_val(df_gen.iloc[ro
