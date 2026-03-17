@@ -58,10 +58,7 @@ if uploaded_file:
 
     # Column Detection Logic
     all_cols = list(df_gen.columns)
-    # Find the index of the column that contains 'AVERAGE'
     avg_index = next((i for i, col in enumerate(all_cols) if "AVERAGE" in str(col).upper()), len(all_cols))
-    
-    # Corrected list comprehension (using 'c' consistently)
     tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(c)]
     
     # 1. New Tournament Setup
@@ -75,10 +72,10 @@ if uploaded_file:
     selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
-    # Data Coordinates (Excel Row 53 = Index 51)
+    # Data Coordinates
     row_sat, row_cat_g, row_cat_v, row_pos, row_neg = 51, 33, 26, 58, 68
 
-    # Core Stats
+    # Scoring
     cz_avg_sat = get_regional_avg(df_gen, row_sat, "CZ", tourn_cols, mapping)
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
     current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
@@ -91,43 +88,46 @@ if uploaded_file:
         score = clean_val(df_gen.iloc[idx, df_gen.columns.get_loc(selected_tour)])
         reg_avg = get_regional_avg(df_gen, idx, focus_region, tourn_cols, mapping)
         if score > 0:
-            kpis.append({
-                'name': df_gen.iloc[idx, 1], 
-                'score': score, 
-                'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 
-                'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 
-                'dev': abs(score - reg_avg)
-            })
+            kpis.append({'name': df_gen.iloc[idx, 1], 'score': score, 'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 'dev': abs(score - reg_avg)})
     top_kpis = sorted(kpis, key=lambda x: x['dev'], reverse=True)[:2]
 
-    # --- 3. PRESENTATION BULLETS (GEMINI) ---
+    # --- 3. PRESENTATION BULLETS (GEMINI WITH FALLBACK) ---
     st.header(f"🥊 {selected_tour} Market Insights")
 
     if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # ATTEMPT FALLBACK CHAIN
+            model_names = ['gemini-1.5-flash', 'gemini-pro', 'gemini-1.5-pro']
+            response_text = None
             
             pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             neg_data = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
             
             prompt = f"""
             Act as an OKTAGON MMA Market Analyst. Create an executive presentation report for {selected_tour} ({focus_region}).
-            
             1. Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
             2. KPI Focus: {top_kpis[0]['name']} ({top_kpis[0]['score']}) and {top_kpis[1]['name']} ({top_kpis[1]['score']})
             3. Feedback Positives: {pos_data}
             4. Feedback Negatives: {neg_data}
             5. Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
-            
-            Output formatting:
-            - Professional OKTAGON MMA style.
-            - Include regional market insights and Catering comparison.
             """
+
+            for m_name in model_names:
+                try:
+                    model = genai.GenerativeModel(m_name)
+                    with st.spinner(f"AI analyzing using {m_name}..."):
+                        response = model.generate_content(prompt)
+                        response_text = response.text
+                        break # Success!
+                except:
+                    continue # Try next model
             
-            with st.spinner("AI analyzing tournament data..."):
-                response = model.generate_content(prompt)
-                st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
+            if response_text:
+                st.markdown(f"<div class='report-container'>{response_text}</div>", unsafe_allow_html=True)
+            else:
+                st.error("AI could not find a supported model. Please check your API key and region permissions.")
                 
         except Exception as e:
             st.error(f"AI Connection Error: {e}")
@@ -151,11 +151,11 @@ if uploaded_file:
 
     g1, g2 = st.columns(2)
     with g1:
-        st.subheader("Market Comparison: Satisfaction")
+        st.subheader("Market Index: Overall Satisfaction")
         fig_m = go.Figure(data=[
             go.Bar(name='Event', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW, text=[f"{current_sat:.2f}"], textposition='auto'),
-            go.Bar(name='CZ Market', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
-            go.Bar(name='DE Market', x=[selected_tour], y=[de_avg_sat], marker_color='#555')
+            go.Bar(name='CZ Avg', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
+            go.Bar(name='DE Avg', x=[selected_tour], y=[de_avg_sat], marker_color='#555')
         ])
         fig_m.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', barmode='group')
         st.plotly_chart(fig_m, use_container_width=True)
