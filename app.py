@@ -50,31 +50,35 @@ def get_regional_avg(df, row_idx, region_name, tourn_cols, mapping):
 st.sidebar.image("https://oktagonmma.com/wp-content/uploads/2022/07/logo-oktagon-white.png", width=180)
 st.sidebar.title("Config")
 gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-
 uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
 
 if uploaded_file:
     df_gen = pd.read_excel(uploaded_file, sheet_name="TICKETING GENERAL")
     df_vip = pd.read_excel(uploaded_file, sheet_name="TICKETING VIP")
 
-    # Column Detection
+    # Column Detection Logic
     all_cols = list(df_gen.columns)
+    # Find the index of the column that contains 'AVERAGE'
     avg_index = next((i for i, col in enumerate(all_cols) if "AVERAGE" in str(col).upper()), len(all_cols))
-    tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(col)]
     
+    # Corrected list comprehension (using 'c' consistently)
+    tourn_cols = [c for c in all_cols[3:avg_index] if "OKT" in str(c) and "Responses" not in str(c)]
+    
+    # 1. New Tournament Setup
     newest_tourn = tourn_cols[-1]
     new_tourn_reg = st.sidebar.selectbox(f"Region for {newest_tourn}", ["CZ", "DE"])
 
     mapping = HISTORICAL_MAPPING.copy()
     mapping[newest_tourn] = new_tourn_reg
 
+    # Select focus
     selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
-    # Data Coordinates
+    # Data Coordinates (Excel Row 53 = Index 51)
     row_sat, row_cat_g, row_cat_v, row_pos, row_neg = 51, 33, 26, 58, 68
 
-    # Scoring
+    # Core Stats
     cz_avg_sat = get_regional_avg(df_gen, row_sat, "CZ", tourn_cols, mapping)
     de_avg_sat = get_regional_avg(df_gen, row_sat, "DE", tourn_cols, mapping)
     current_sat = clean_val(df_gen.iloc[row_sat, df_gen.columns.get_loc(selected_tour)])
@@ -87,7 +91,13 @@ if uploaded_file:
         score = clean_val(df_gen.iloc[idx, df_gen.columns.get_loc(selected_tour)])
         reg_avg = get_regional_avg(df_gen, idx, focus_region, tourn_cols, mapping)
         if score > 0:
-            kpis.append({'name': df_gen.iloc[idx, 1], 'score': score, 'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 'dev': abs(score - reg_avg)})
+            kpis.append({
+                'name': df_gen.iloc[idx, 1], 
+                'score': score, 
+                'avg_cz': get_regional_avg(df_gen, idx, "CZ", tourn_cols, mapping), 
+                'avg_de': get_regional_avg(df_gen, idx, "DE", tourn_cols, mapping), 
+                'dev': abs(score - reg_avg)
+            })
     top_kpis = sorted(kpis, key=lambda x: x['dev'], reverse=True)[:2]
 
     # --- 3. PRESENTATION BULLETS (GEMINI) ---
@@ -96,7 +106,6 @@ if uploaded_file:
     if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
-            # We try Flash 1.5 first, then Pro as backup
             model = genai.GenerativeModel('gemini-1.5-flash')
             
             pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
@@ -105,30 +114,25 @@ if uploaded_file:
             prompt = f"""
             Act as an OKTAGON MMA Market Analyst. Create an executive presentation report for {selected_tour} ({focus_region}).
             
-            Overall Score: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
-            KPI 1: {top_kpis[0]['name']} ({top_kpis[0]['score']})
-            KPI 2: {top_kpis[1]['name']} ({top_kpis[1]['score']})
-            Positives: {pos_data}
-            Negatives: {neg_data}
-            Catering Score: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
+            1. Satisfaction: {current_sat:.2f} (CZ Avg: {cz_avg_sat:.2f}, DE Avg: {de_avg_sat:.2f})
+            2. KPI Focus: {top_kpis[0]['name']} ({top_kpis[0]['score']}) and {top_kpis[1]['name']} ({top_kpis[1]['score']})
+            3. Feedback Positives: {pos_data}
+            4. Feedback Negatives: {neg_data}
+            5. Catering: Gen {clean_val(df_gen.iloc[row_cat_g, df_gen.columns.get_loc(selected_tour)])}, VIP {clean_val(df_vip.iloc[row_cat_v, df_vip.columns.get_loc(selected_tour)])}
             
-            Format as:
-            1. OKTAGON Market Insight: CZ vs. DE Performance
-            2. Key Performance Indicators (KPIs)
-            3. {selected_tour} Feedback Summary (+/-)
-            4. Catering Result Comparison (General vs VIP)
+            Output formatting:
+            - Professional OKTAGON MMA style.
+            - Include regional market insights and Catering comparison.
             """
             
             with st.spinner("AI analyzing tournament data..."):
                 response = model.generate_content(prompt)
                 st.markdown(f"<div class='report-container'>{response.text}</div>", unsafe_allow_html=True)
-                st.sidebar.success("AI Connected Successfully")
                 
         except Exception as e:
-            st.error(f"AI Error: {e}")
-            st.sidebar.error("AI Error - check your key/quota")
+            st.error(f"AI Connection Error: {e}")
     else:
-        st.warning("⚠️ Please enter your Gemini API Key in the sidebar to generate the AI report.")
+        st.warning("⚠️ Enter Gemini API Key in sidebar for AI Analysis.")
 
     st.divider()
 
@@ -137,15 +141,21 @@ if uploaded_file:
     k1, k2 = st.columns(2)
     for i, k_col in enumerate([k1, k2]):
         with k_col:
-            st.markdown(f"<div class='kpi-card'><h4 style='color:{OKT_YELLOW};'>{top_kpis[i]['name']}</h4><h1 style='color:white; font-size:45px;'>{top_kpis[i]['score']:.2f}</h1><p>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p></div>", unsafe_allow_html=True)
+            st.markdown(f"""
+                <div class='kpi-card'>
+                    <h4 style='color:{OKT_YELLOW}; margin:0;'>{top_kpis[i]['name']}</h4>
+                    <h1 style='color:white; font-size:45px; margin:10px 0;'>{top_kpis[i]['score']:.2f}</h1>
+                    <p style='color:#888; margin:0;'>CZ Avg: {top_kpis[i]['avg_cz']:.2f} | DE Avg: {top_kpis[i]['avg_de']:.2f}</p>
+                </div>
+            """, unsafe_allow_html=True)
 
     g1, g2 = st.columns(2)
     with g1:
         st.subheader("Market Comparison: Satisfaction")
         fig_m = go.Figure(data=[
-            go.Bar(name='Current', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW),
-            go.Bar(name='CZ Avg', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
-            go.Bar(name='DE Avg', x=[selected_tour], y=[de_avg_sat], marker_color='#555')
+            go.Bar(name='Event', x=[selected_tour], y=[current_sat], marker_color=OKT_YELLOW, text=[f"{current_sat:.2f}"], textposition='auto'),
+            go.Bar(name='CZ Market', x=[selected_tour], y=[cz_avg_sat], marker_color='#FFF'),
+            go.Bar(name='DE Market', x=[selected_tour], y=[de_avg_sat], marker_color='#555')
         ])
         fig_m.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', barmode='group')
         st.plotly_chart(fig_m, use_container_width=True)
@@ -174,5 +184,5 @@ if uploaded_file:
             if clean_val(val) > 0: st.markdown(f"<div class='minus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
 
 else:
-    st.title("🥊 OKTAGON MMA: AI Survey Analyst")
+    st.title("🥊 OKTAGON MMA: AI Analyst")
     st.info("Upload the survey results .xlsx file in the sidebar to begin analysis.")
