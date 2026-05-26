@@ -11,7 +11,7 @@ HISTORICAL_MAPPING = {
     "OKT72": "CZ", "OKT73": "DE", "OKT74": "CZ", "OKT75": "DE", 
     "OKT76": "DE", "OKT77": "CZ", "OKT78": "DE", "OKT79": "CZ", 
     "OKT80": "DE", "OKT81": "CZ", "OKT82": "DE", "OKT83": "DE", 
-    "OKT84": "CZ"
+    "OKT84": "CZ", "OKT85": "DE", "OKT86": "CZ", "OKT87": "CZ"
 }
 
 OKT_YELLOW = "#FFCC00"
