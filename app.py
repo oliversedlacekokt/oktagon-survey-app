@@ -65,6 +65,42 @@ def get_avg(df, row_idx, region_name, tourn_cols, mapping):
     vals = [v for v in vals if v > 0]
     return sum(vals)/len(vals) if vals else 0
 
+def row_anchor(df, r):
+    """First meaningful text cell in a row - used as a section-title anchor."""
+    if r is None or r >= len(df):
+        return None
+    for c in range(min(4, df.shape[1])):
+        v = df.iloc[r, c]
+        if isinstance(v, str) and v.strip() and not v.strip().replace('.', '').replace(',', '').isdigit():
+            return v.strip()
+    return None
+
+def find_header_row(df, anchor):
+    """Locate the row whose leading cells contain the given section title."""
+    if not anchor:
+        return None
+    for r in range(len(df)):
+        for c in range(min(4, df.shape[1])):
+            v = df.iloc[r, c]
+            if isinstance(v, str) and anchor.lower() in v.lower():
+                return r
+    return None
+
+def extract_feedback(df, header_row, tour_col):
+    """Return [(answer, pct), ...] for the 6 rows below a feedback header."""
+    out = []
+    if header_row is None:
+        return out
+    for i in range(1, 7):
+        r = header_row + i
+        if r >= len(df):
+            break
+        ans = df.iloc[r, 2]
+        pct = clean_val(df.iloc[r, df.columns.get_loc(tour_col)])
+        if pct > 0 and pd.notna(ans) and str(ans).strip():
+            out.append((str(ans).strip(), pct))
+    return out
+
 @st.cache_data(show_spinner=False)
 def load_sheets(file):
     """Read both worksheets once and cache them so re-runs are instant."""
@@ -148,6 +184,23 @@ if uploaded_file:
     # Fast lookup by display label so we don't rescan the list repeatedly
     kpi_by_label = {f"[{k['source']}] {k['name']}": k for k in processed_kpis}
 
+    # --- WRITTEN FEEDBACK (positives / negatives in %) for GENERAL and VIP ---
+    # GENERAL block sits at known rows; VIP block is located by matching the same
+    # section titles inside the VIP sheet (its rows differ from GENERAL).
+    GEN_POS_ROW, GEN_NEG_ROW = 58, 68
+    vip_pos_row = find_header_row(df_vip, row_anchor(df_gen, GEN_POS_ROW))
+    vip_neg_row = find_header_row(df_vip, row_anchor(df_gen, GEN_NEG_ROW))
+    feedback = {
+        'GENERAL': {
+            'pos': extract_feedback(df_gen, GEN_POS_ROW, selected_tour),
+            'neg': extract_feedback(df_gen, GEN_NEG_ROW, selected_tour),
+        },
+        'VIP': {
+            'pos': extract_feedback(df_vip, vip_pos_row, selected_tour),
+            'neg': extract_feedback(df_vip, vip_neg_row, selected_tour),
+        },
+    }
+
     # --- 1. OVERALL SCORE & KPI PICKER ---
     st.title(f"🥊 {selected_tour} Executive Report")
 
@@ -169,11 +222,6 @@ if uploaded_file:
         try:
             client = Groq(api_key=GROQ_API_KEY)
 
-            # Prepare data for AI
-            row_pos, row_neg = 58, 68
-            pos_data = df_gen.iloc[row_pos+1:row_pos+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
-            neg_data = df_gen.iloc[row_neg+1:row_neg+7, [2, df_gen.columns.get_loc(selected_tour)]].values.tolist()
-
             # Extract current sat for AI
             sat_row_idx = 51
             cur_sat = clean_val(df_gen.iloc[sat_row_idx, df_gen.columns.get_loc(selected_tour)])
@@ -185,6 +233,9 @@ if uploaded_file:
                 return [{'name': k['name'], 'score': k['score'],
                          'cz_avg': round(k['avg_cz'], 2), 'de_avg': round(k['avg_de'], 2)}
                         for k in kpis]
+
+            def fb_lines(items):
+                return [f"{ans} ({pct:g}%)" for ans, pct in items] or ["(no data)"]
 
             general_kpis = [k for k in processed_kpis if k['source'] == 'GENERAL']
             vip_kpis = [k for k in processed_kpis if k['source'] == 'VIP']
@@ -199,17 +250,20 @@ if uploaded_file:
 
             === GENERAL DATA (respondents = {resp_general}) ===
             ALL indicators: {kpi_lines(general_kpis)}
-            Positives: {pos_data}
-            Negatives: {neg_data}
+            Written feedback - biggest POSITIVES (% of respondents): {fb_lines(feedback['GENERAL']['pos'])}
+            Written feedback - biggest NEGATIVES (% of respondents): {fb_lines(feedback['GENERAL']['neg'])}
 
             === VIP DATA (respondents = {resp_vip}) ===
             ALL indicators: {kpi_lines(vip_kpis)}
+            Written feedback - biggest POSITIVES (% of respondents): {fb_lines(feedback['VIP']['pos'])}
+            Written feedback - biggest NEGATIVES (% of respondents): {fb_lines(feedback['VIP']['neg'])}
 
             INSTRUCTIONS:
             - Begin the whole report with one line stating the total respondent count: GENERAL, VIP and the combined total.
             - Then produce TWO clearly separated sections using markdown headings exactly: "## GENERAL Analysis" and "## VIP Analysis".
             - Each section MUST start by stating its own respondent count.
             - In each section analyze EVERY listed indicator (do not skip any), and for each explicitly mention the CZ and DE market averages for context.
+            - In each section include a "Written feedback" part that reports the biggest POSITIVES and the biggest NEGATIVES WITH their exact percentages, ranked from highest to lowest %.
             - Keep each section self-contained and concise enough to fit on a single presentation slide.
             - Take the sample sizes into account when judging how reliable the findings are.
             - Professional MMA industry tone.
@@ -274,19 +328,25 @@ if uploaded_file:
     else:
         st.info("Select at least one KPI above to populate the featured cards.")
 
-    # --- 5. FEEDBACK ---
-    st.header("📝 Qualitative Feedback (General)")
-    f_p, f_m = st.columns(2)
-    with f_p:
-        st.markdown("<p style='color:#28a745; font-weight:600;'>Positives (+)</p>", unsafe_allow_html=True)
-        for i in range(1, 7):
-            ans, val = df_gen.iloc[58+i, 2], df_gen.iloc[58+i, df_gen.columns.get_loc(selected_tour)]
-            if clean_val(val) > 0: st.markdown(f"<div class='plus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
-    with f_m:
-        st.markdown("<p style='color:#dc3545; font-weight:600;'>Negatives (-)</p>", unsafe_allow_html=True)
-        for i in range(1, 7):
-            ans, val = df_gen.iloc[68+i, 2], df_gen.iloc[68+i, df_gen.columns.get_loc(selected_tour)]
-            if clean_val(val) > 0: st.markdown(f"<div class='minus-box'><b>{val}%</b> — {ans}</div>", unsafe_allow_html=True)
+    # --- 5. FEEDBACK (GENERAL + VIP) ---
+    def render_feedback(label, fb):
+        st.header(f"📝 Qualitative Feedback ({label})")
+        f_p, f_m = st.columns(2)
+        with f_p:
+            st.markdown("<p style='color:#28a745; font-weight:600;'>Positives (+)</p>", unsafe_allow_html=True)
+            for ans, pct in sorted(fb['pos'], key=lambda x: x[1], reverse=True):
+                st.markdown(f"<div class='plus-box'><b>{pct:g}%</b> — {ans}</div>", unsafe_allow_html=True)
+            if not fb['pos']:
+                st.caption("No positive feedback detected for this sheet.")
+        with f_m:
+            st.markdown("<p style='color:#dc3545; font-weight:600;'>Negatives (-)</p>", unsafe_allow_html=True)
+            for ans, pct in sorted(fb['neg'], key=lambda x: x[1], reverse=True):
+                st.markdown(f"<div class='minus-box'><b>{pct:g}%</b> — {ans}</div>", unsafe_allow_html=True)
+            if not fb['neg']:
+                st.caption("No negative feedback detected for this sheet.")
+
+    render_feedback("General", feedback['GENERAL'])
+    render_feedback("VIP", feedback['VIP'])
 
 else:
     st.title("🥊 OKTAGON MMA: Pro AI Analyst")
