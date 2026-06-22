@@ -165,7 +165,7 @@ if uploaded_file:
     final_selected_kpis = [kpi_by_label[label] for label in selected_kpi_names]
 
     # --- 2. GROQ AI REPORT ---
-    if final_selected_kpis:
+    if processed_kpis:
         try:
             client = Groq(api_key=GROQ_API_KEY)
 
@@ -180,22 +180,37 @@ if uploaded_file:
             cz_sat_avg = get_avg(df_gen, sat_row_idx, "CZ", tourn_cols, mapping)
             de_sat_avg = get_avg(df_gen, sat_row_idx, "DE", tourn_cols, mapping)
 
+            # Split ALL indicators by source so each gets its own full analysis
+            def kpi_lines(kpis):
+                return [{'name': k['name'], 'score': k['score'],
+                         'cz_avg': round(k['avg_cz'], 2), 'de_avg': round(k['avg_de'], 2)}
+                        for k in kpis]
+
+            general_kpis = [k for k in processed_kpis if k['source'] == 'GENERAL']
+            vip_kpis = [k for k in processed_kpis if k['source'] == 'VIP']
+            total_resp = resp_general + resp_vip
+
             prompt = f"""
             You are an OKTAGON MMA Market Researcher. Analyze {selected_tour} ({focus_region}).
 
-            Sample size: GENERAL respondents = {resp_general}, VIP respondents = {resp_vip}.
+            TOTAL RESPONDENTS: GENERAL = {resp_general}, VIP = {resp_vip}, COMBINED TOTAL = {total_resp}.
 
-            Overall Sat: {cur_sat} (CZ Avg: {cz_sat_avg:.2f}, DE Avg: {de_sat_avg:.2f})
+            Overall Satisfaction (GENERAL): {cur_sat} (CZ Avg: {cz_sat_avg:.2f}, DE Avg: {de_sat_avg:.2f})
 
-            KPI DATA (Source labeled):
-            {[{'name': k['name'], 'source': k['source'], 'score': k['score'], 'cz_avg': k['avg_cz'], 'de_avg': k['avg_de']} for k in final_selected_kpis]}
+            === GENERAL DATA (respondents = {resp_general}) ===
+            ALL indicators: {kpi_lines(general_kpis)}
+            Positives: {pos_data}
+            Negatives: {neg_data}
 
-            Feedback: Positives {pos_data}, Negatives {neg_data}
+            === VIP DATA (respondents = {resp_vip}) ===
+            ALL indicators: {kpi_lines(vip_kpis)}
 
             INSTRUCTIONS:
-            - Provide detailed market insights.
-            - For EVERY KPI listed, explicitly mention the CZ and DE market averages to provide context.
-            - Compare General vs VIP performance where applicable.
+            - Begin the whole report with one line stating the total respondent count: GENERAL, VIP and the combined total.
+            - Then produce TWO clearly separated sections using markdown headings exactly: "## GENERAL Analysis" and "## VIP Analysis".
+            - Each section MUST start by stating its own respondent count.
+            - In each section analyze EVERY listed indicator (do not skip any), and for each explicitly mention the CZ and DE market averages for context.
+            - Keep each section self-contained and concise enough to fit on a single presentation slide.
             - Take the sample sizes into account when judging how reliable the findings are.
             - Professional MMA industry tone.
             """
