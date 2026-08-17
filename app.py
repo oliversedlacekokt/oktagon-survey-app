@@ -1,4 +1,5 @@
 import os
+import re
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -32,13 +33,19 @@ GROQ_MODEL_CANDIDATES = [
     ] if m
 ]
 
-# Default region classification for historical tournaments. This is only the
-# starting point now - the user can override every tournament in the sidebar.
+# Default region classification per tournament, covering both past events and
+# the scheduled ones up to OKT100. This is only the starting point - the user
+# can override every tournament in the sidebar.
 HISTORICAL_MAPPING = {
     "OKT72": "CZ", "OKT73": "DE", "OKT74": "CZ", "OKT75": "DE",
     "OKT76": "DE", "OKT77": "CZ", "OKT78": "DE", "OKT79": "CZ",
     "OKT80": "DE", "OKT81": "CZ", "OKT82": "DE", "OKT83": "DE",
-    "OKT84": "CZ", "OKT85": "DE", "OKT86": "CZ", "OKT87": "CZ"
+    "OKT84": "CZ", "OKT85": "DE", "OKT86": "CZ", "OKT87": "CZ",
+    # Scheduled events
+    "OKT88": "DE", "OKT89": "CZ", "OKT90": "DE", "OKT91": "DE",
+    "OKT92": "CZ", "OKT93": "CZ", "OKT94": "DE", "OKT95": "CZ",
+    "OKT96": "DE", "OKT97": "DE", "OKT98": "CZ", "OKT99": "DE",
+    "OKT100": "CZ",
 }
 
 REGION_OPTIONS = ["CZ", "DE"]  # CZ = CZ/SK market, DE = German market
@@ -75,6 +82,13 @@ def clean_val(val):
         clean = str(val).replace('%', '').replace(',', '.').replace('★', '').strip()
         return float(clean)
     except: return 0.0
+
+def default_region(col):
+    """Default region for an Excel column header. The header is normalised to
+    the bare event id first ("okt 88", "OKT88 ", "OKT088" -> "OKT88") so a stray
+    space or case difference does not silently fall back to CZ."""
+    m = re.search(r"OKT\s*0*(\d+)", str(col).upper())
+    return HISTORICAL_MAPPING.get(f"OKT{m.group(1)}", "CZ") if m else "CZ"
 
 def get_avg(df, row_idx, region_name, tourn_cols, mapping):
     vals = [clean_val(df.iloc[row_idx, df.columns.get_loc(c)]) for c in tourn_cols if mapping.get(c) == region_name]
@@ -161,12 +175,12 @@ if uploaded_file:
 
     # --- EDITABLE REGION MAPPING (CZ/SK vs DE) ---
     # Every detected tournament can be re-classified here. Defaults come from
-    # HISTORICAL_MAPPING; anything unknown (e.g. the newest event) defaults to CZ.
+    # HISTORICAL_MAPPING; anything not listed there defaults to CZ.
     st.sidebar.subheader("🗺️ Tournament Region Mapping")
     st.sidebar.caption("CZ = CZ/SK market • DE = German market")
     region_df = pd.DataFrame({
         "Tournament": tourn_cols,
-        "Region": [HISTORICAL_MAPPING.get(c, "CZ") for c in tourn_cols],
+        "Region": [default_region(c) for c in tourn_cols],
     })
     edited_regions = st.sidebar.data_editor(
         region_df,
