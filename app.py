@@ -50,30 +50,242 @@ HISTORICAL_MAPPING = {
 
 REGION_OPTIONS = ["CZ", "DE"]  # CZ = CZ/SK market, DE = German market
 
-OKT_YELLOW = "#FFCC00"
-OKT_BLACK = "#000000"
-OKT_WHITE = "#FFFFFF"
+# --- BRAND CONSTANTS (OKTAGON Design Guide V01) ---
+# Exact primary palette. The previous revision used #FFCC00 / #000000 / #FFFFFF,
+# none of which are the specified values.
+OKT_YELLOW = "#FFD100"   # RGB 255,210,0
+OKT_BLACK = "#1F1F1F"    # RGB 30,30,30
+OKT_LIGHT = "#F0F0F0"    # RGB 240,240,240
 
-st.set_page_config(page_title="OKTAGON Pro Analyst", layout="wide")
+# Neutral steps derived from OKTAGON BLACK, used only for surfaces, borders and
+# lower-hierarchy text. The guide does not publish a secondary palette, so
+# nothing here introduces a new hue - these are shades of the primary black.
+OKT_SURFACE = "#262626"
+OKT_SURFACE_DEEP = "#171717"
+OKT_LINE = "#3A3A3A"
+OKT_MUTED = "#8C8C8C"
+OKT_GREY = "#6E6E6E"
 
-# PROFESSIONAL CSS (INTER FONT, CLEANER WEIGHTS)
+# Futura Now (headlines) and Bebas Neue Pro (support) are licensed typefaces and
+# cannot be pulled from a CDN. The stacks name them first so a self-hosted or
+# locally installed copy wins, then fall back to the closest free geometric
+# equivalents: Jost for Futura, Bebas Neue for Bebas Neue Pro.
+FONT_DISPLAY = "'Futura Now Headline', 'Futura Now', 'FuturaNowHeadline', 'Jost', 'Futura', sans-serif"
+FONT_SUPPORT = "'Bebas Neue Pro', 'BebasNeuePro', 'Bebas Neue', 'Jost', sans-serif"
+
+# The symbol: an octagon formed by two intersecting squares, per the symbol
+# philosophy (two opponents, two squares, the balance between them). This is a
+# geometric stand-in - drop the official SVG in assets/ when available.
+OKT_SYMBOL_SVG = f"""
+<svg viewBox="0 0 100 100" width="100%" height="100%" aria-hidden="true">
+  <rect x="20" y="20" width="60" height="60" fill="none"
+        stroke="{OKT_YELLOW}" stroke-width="7"/>
+  <rect x="20" y="20" width="60" height="60" fill="none"
+        stroke="{OKT_YELLOW}" stroke-width="7" transform="rotate(45 50 50)"/>
+</svg>
+"""
+
+st.set_page_config(page_title="OKTAGON | Survey Analyst", layout="wide")
+
+# --- BRAND CSS ---
+# Geometric, square-cornered, high contrast. Headlines are uppercase Futura with
+# kerning -25 (= -0.025em); numbers and technical annotations run in Bebas.
 st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Jost:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,700;1,800&family=Bebas+Neue&display=swap');
 
-    .stApp {{ background-color: {OKT_BLACK}; color: {OKT_WHITE}; font-family: 'Inter', sans-serif; }}
-    h1, h2, h3 {{ color: {OKT_WHITE} !important; font-weight: 600 !important; }}
-    p, span, label, div {{ color: {OKT_WHITE} !important; font-weight: 400 !important; }}
+    .stApp {{
+        background-color: {OKT_BLACK};
+        color: {OKT_LIGHT};
+        font-family: {FONT_DISPLAY};
+    }}
 
-    .stMetric {{ background-color: #111; padding: 15px; border-radius: 10px; border: 1px solid {OKT_YELLOW}; }}
-    .plus-box {{ background-color: #28a745; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #1e7e34; font-size: 14px; }}
-    .minus-box {{ background-color: #dc3545; color: white !important; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #a71d2a; font-size: 14px; }}
-    .kpi-card {{ background-color: #111; padding: 20px; border-radius: 12px; border-top: 3px solid {OKT_YELLOW}; margin-bottom: 15px; }}
-    .source-tag {{ font-size: 10px; color: {OKT_YELLOW}; font-weight: 600; text-transform: uppercase; border: 1px solid {OKT_YELLOW}; padding: 2px 5px; border-radius: 4px; margin-right: 5px; }}
-    .report-container {{ background-color: #0c0c0c; padding: 30px; border: 1px solid #333; border-radius: 10px; line-height: 1.7; color: #efefef !important; font-size: 15px; }}
-    .stSelectbox label {{ color: {OKT_YELLOW} !important; font-weight: 600 !important; }}
+    /* Headlines: Futura Now Headline XBold, uppercase, kerning -25 */
+    h1, h2, h3, h4 {{
+        color: {OKT_LIGHT} !important;
+        font-family: {FONT_DISPLAY} !important;
+        font-weight: 800 !important;
+        text-transform: uppercase !important;
+        letter-spacing: -0.025em !important;
+        line-height: 1.05 !important;
+    }}
+    h1 {{ font-size: 2.9rem !important; }}
+    h2 {{ font-size: 1.55rem !important; }}
+    h3 {{ font-size: 1.15rem !important; }}
+
+    /* Section headings carry a yellow rule - the structural grid cue */
+    .stApp h2 {{
+        border-left: 5px solid {OKT_YELLOW};
+        padding-left: 14px;
+        margin-top: 2.4rem !important;
+        margin-bottom: 1.1rem !important;
+    }}
+
+    p, span, label, div, li {{ color: {OKT_LIGHT}; font-weight: 400; }}
+
+    /* Technical annotations / lower hierarchy: Bebas Neue Pro Expanded */
+    .okt-tech, [data-testid="stCaptionContainer"] p {{
+        font-family: {FONT_SUPPORT} !important;
+        letter-spacing: 0.08em !important;
+        text-transform: uppercase !important;
+        color: {OKT_MUTED} !important;
+        font-size: 0.85rem !important;
+    }}
+
+    /* --- BRAND HEADER --- */
+    .okt-header {{
+        display: flex; align-items: center; gap: 20px;
+        padding: 6px 0 22px 0; border-bottom: 1px solid {OKT_LINE}; margin-bottom: 8px;
+    }}
+    .okt-symbol {{ width: 62px; height: 62px; flex: 0 0 62px; }}
+    .okt-wordmark {{
+        font-family: {FONT_DISPLAY}; font-weight: 900; font-size: 2.6rem;
+        letter-spacing: -0.025em; line-height: 1; color: {OKT_LIGHT};
+    }}
+    .okt-descriptor {{
+        font-family: {FONT_SUPPORT}; font-size: 1rem; letter-spacing: 0.22em;
+        text-transform: uppercase; color: {OKT_YELLOW}; margin-top: 4px;
+    }}
+
+    /* --- METRICS --- */
+    [data-testid="stMetric"] {{
+        background-color: {OKT_SURFACE}; padding: 18px 20px; border-radius: 0;
+        border-left: 4px solid {OKT_YELLOW};
+    }}
+    [data-testid="stMetricValue"] {{
+        font-family: {FONT_SUPPORT} !important; font-size: 2.6rem !important;
+        color: {OKT_LIGHT} !important; letter-spacing: 0.02em;
+    }}
+    [data-testid="stMetricLabel"] p {{
+        font-family: {FONT_SUPPORT} !important; text-transform: uppercase !important;
+        letter-spacing: 0.14em !important; color: {OKT_MUTED} !important;
+    }}
+
+    /* --- KPI CARDS --- */
+    .kpi-card {{
+        background-color: {OKT_SURFACE}; padding: 22px; border-radius: 0;
+        border-top: 4px solid {OKT_YELLOW}; margin-bottom: 15px; height: 100%;
+    }}
+    .kpi-name {{
+        font-family: {FONT_DISPLAY}; font-weight: 800; text-transform: uppercase;
+        letter-spacing: -0.02em; font-size: 1.05rem; color: {OKT_LIGHT};
+        margin: 14px 0 6px 0; line-height: 1.15;
+    }}
+    .kpi-score {{
+        font-family: {FONT_SUPPORT}; font-size: 3.4rem; line-height: 1;
+        color: {OKT_YELLOW}; letter-spacing: 0.01em; margin: 2px 0 10px 0;
+    }}
+    .kpi-bench {{
+        font-family: {FONT_SUPPORT}; font-size: 0.9rem; letter-spacing: 0.1em;
+        text-transform: uppercase; color: {OKT_MUTED}; line-height: 1.6;
+    }}
+    .source-tag {{
+        font-family: {FONT_SUPPORT}; font-size: 0.8rem; color: {OKT_BLACK} !important;
+        background-color: {OKT_YELLOW}; letter-spacing: 0.16em;
+        text-transform: uppercase; padding: 3px 9px; border-radius: 0;
+    }}
+
+    /* --- QUALITATIVE FEEDBACK ---
+       Positives and negatives are separated structurally (yellow vs neutral rule)
+       rather than with a red/green pair, which sits outside the brand palette. */
+    .fb-row {{
+        display: flex; align-items: baseline; gap: 14px;
+        background-color: {OKT_SURFACE_DEEP}; padding: 13px 16px;
+        margin-bottom: 8px; border-left: 3px solid {OKT_LINE};
+    }}
+    .fb-row.pos {{ border-left-color: {OKT_YELLOW}; }}
+    .fb-row.neg {{ border-left-color: {OKT_GREY}; }}
+    .fb-pct {{
+        font-family: {FONT_SUPPORT}; font-size: 1.5rem; line-height: 1;
+        flex: 0 0 auto; min-width: 62px; letter-spacing: 0.02em;
+    }}
+    .fb-row.pos .fb-pct {{ color: {OKT_YELLOW}; }}
+    .fb-row.neg .fb-pct {{ color: {OKT_LIGHT}; }}
+    .fb-text {{ font-size: 0.95rem; color: {OKT_LIGHT}; line-height: 1.45; }}
+    .fb-head {{
+        font-family: {FONT_SUPPORT}; text-transform: uppercase;
+        letter-spacing: 0.18em; font-size: 1rem; margin-bottom: 12px;
+        padding-bottom: 6px; border-bottom: 1px solid {OKT_LINE};
+    }}
+    .fb-head.pos {{ color: {OKT_YELLOW}; }}
+    .fb-head.neg {{ color: {OKT_MUTED}; }}
+
+    /* --- AI REPORT --- */
+    .report-container {{
+        background-color: {OKT_SURFACE_DEEP}; padding: 34px 38px;
+        border-radius: 0; border-left: 4px solid {OKT_YELLOW};
+        line-height: 1.75; color: {OKT_LIGHT}; font-size: 1rem;
+    }}
+    .report-container h2 {{
+        font-size: 1.3rem !important; border-left: none !important;
+        padding-left: 0 !important; color: {OKT_YELLOW} !important;
+        margin-top: 1.8rem !important;
+    }}
+    .report-container h2:first-child {{ margin-top: 0 !important; }}
+
+    /* --- CONTROLS --- */
+    .stSelectbox label, .stMultiSelect label, .stNumberInput label,
+    .stFileUploader label {{
+        font-family: {FONT_SUPPORT} !important; text-transform: uppercase !important;
+        letter-spacing: 0.13em !important; color: {OKT_YELLOW} !important;
+        font-size: 0.9rem !important;
+    }}
+    [data-testid="stSidebar"] {{
+        background-color: {OKT_SURFACE_DEEP};
+        border-right: 1px solid {OKT_LINE};
+    }}
+    [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {{
+        border-left: none !important; padding-left: 0 !important;
+        font-size: 1rem !important; color: {OKT_LIGHT} !important;
+        margin-top: 1.6rem !important;
+    }}
+    .stMultiSelect [data-baseweb="tag"] {{
+        background-color: {OKT_YELLOW} !important; border-radius: 0 !important;
+    }}
+    .stMultiSelect [data-baseweb="tag"] span {{
+        color: {OKT_BLACK} !important; font-family: {FONT_SUPPORT} !important;
+        letter-spacing: 0.06em !important;
+    }}
+    hr {{ border-color: {OKT_LINE}; }}
     </style>
     """, unsafe_allow_html=True)
+
+
+def render_brand_header(descriptor):
+    """Primary (horizontal) logotype lock-up: symbol left, wordmark right.
+    The guide removed the 'MMA' descriptor from the brand name - OKTAGON alone
+    carries it - so the descriptor slot names the tool, never the sport."""
+    st.markdown(
+        f"""<div class='okt-header'>
+              <div class='okt-symbol'>{OKT_SYMBOL_SVG}</div>
+              <div>
+                <div class='okt-wordmark'>OKTAGON</div>
+                <div class='okt-descriptor'>{descriptor}</div>
+              </div>
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def style_fig(fig, **layout):
+    """Apply the brand chart treatment: transparent ground, geometric type,
+    minimal rules, yellow as the only accent."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Jost, sans-serif", color=OKT_LIGHT, size=13),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0,
+                    bgcolor="rgba(0,0,0,0)",
+                    font=dict(family="Bebas Neue, sans-serif", size=15)),
+        margin=dict(l=10, r=10, t=48, b=10),
+        xaxis=dict(showgrid=False, linecolor=OKT_LINE,
+                   tickfont=dict(family="Bebas Neue, sans-serif", size=17)),
+        yaxis=dict(range=[0, 5.5], gridcolor=OKT_LINE, zerolinecolor=OKT_LINE,
+                   tickfont=dict(family="Bebas Neue, sans-serif", size=15)),
+        **layout,
+    )
+    return fig
+
 
 # --- UTILITIES ---
 def clean_val(val):
@@ -163,7 +375,7 @@ def load_sheets(file):
     return df_gen, df_vip
 
 # --- DATA PROCESSING ---
-uploaded_file = st.sidebar.file_uploader("Upload Tournament Spreadsheet", type="xlsx")
+uploaded_file = st.sidebar.file_uploader("Tournament Spreadsheet", type="xlsx")
 
 if uploaded_file:
     df_gen, df_vip = load_sheets(uploaded_file)
@@ -176,7 +388,7 @@ if uploaded_file:
     # --- EDITABLE REGION MAPPING (CZ/SK vs DE) ---
     # Every detected tournament can be re-classified here. Defaults come from
     # HISTORICAL_MAPPING; anything not listed there defaults to CZ.
-    st.sidebar.subheader("🗺️ Tournament Region Mapping")
+    st.sidebar.subheader("Region Mapping")
     st.sidebar.caption("CZ = CZ/SK market • DE = German market")
     region_df = pd.DataFrame({
         "Tournament": tourn_cols,
@@ -195,12 +407,12 @@ if uploaded_file:
     mapping = dict(zip(edited_regions["Tournament"], edited_regions["Region"]))
 
     # --- RESPONDENT COUNTS ---
-    st.sidebar.subheader("👥 Respondent Counts")
+    st.sidebar.subheader("Respondent Counts")
     resp_general = st.sidebar.number_input("Respondents GENERAL", min_value=0, value=0, step=1)
     resp_vip = st.sidebar.number_input("Respondents VIP", min_value=0, value=0, step=1)
 
     # Sidebar Selection
-    selected_tour = st.sidebar.selectbox("🎯 Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
+    selected_tour = st.sidebar.selectbox("Focus Tournament", tourn_cols, index=len(tourn_cols)-1)
     focus_region = mapping.get(selected_tour, "CZ")
 
     # Mapping Ratings from both sheets
@@ -256,7 +468,8 @@ if uploaded_file:
     }
 
     # --- 1. OVERALL SCORE & KPI PICKER ---
-    st.title(f"🥊 {selected_tour} Executive Report")
+    render_brand_header("Survey Analyst")
+    st.title(f"{selected_tour} Executive Report")
 
     # Respondent overview
     m1, m2 = st.columns(2)
@@ -264,7 +477,7 @@ if uploaded_file:
     m2.metric("Respondents VIP", f"{resp_vip:,}")
 
     # Custom Selection for "Featured KPIs"
-    st.subheader("Select KPIs to include in AI Analysis & Benchmarks")
+    st.header("KPI Selection")
     sorted_devs = sorted(processed_kpis, key=lambda x: x['dev'], reverse=True)
     kpi_options = [f"[{k['source']}] {k['name']}" for k in sorted_devs]
     selected_kpi_names = st.multiselect("Pick indicators (Recommended: top deviators selected by default)", kpi_options, default=kpi_options[:3])
@@ -302,7 +515,7 @@ if uploaded_file:
             total_resp = resp_general + resp_vip
 
             prompt = f"""
-            You are an OKTAGON MMA Market Researcher. Analyze {selected_tour} ({focus_region}).
+            You are an OKTAGON Market Researcher. Analyze {selected_tour} ({focus_region}).
 
             TOTAL RESPONDENTS: GENERAL = {resp_general}, VIP = {resp_vip}, COMBINED TOTAL = {total_resp}.
 
@@ -369,7 +582,7 @@ if uploaded_file:
     st.divider()
 
     # --- 3. INTERACTIVE GRAPHICS SECTION ---
-    st.header("📊 Interactive Data Audit")
+    st.header("Interactive Data Audit")
 
     c1, c2 = st.columns(2)
 
@@ -380,10 +593,10 @@ if uploaded_file:
 
         fig = go.Figure(data=[
             go.Bar(name='Event', x=[selected_tour], y=[k_data['score']], marker_color=OKT_YELLOW, text=[k_data['score']], textposition='auto'),
-            go.Bar(name='CZ Market', x=[selected_tour], y=[k_data['avg_cz']], marker_color='#FFF', text=[f"{k_data['avg_cz']:.2f}"], textposition='auto'),
-            go.Bar(name='DE Market', x=[selected_tour], y=[k_data['avg_de']], marker_color='#666', text=[f"{k_data['avg_de']:.2f}"], textposition='auto')
+            go.Bar(name='CZ Market', x=[selected_tour], y=[k_data['avg_cz']], marker_color=OKT_LIGHT, text=[f"{k_data['avg_cz']:.2f}"], textposition='auto'),
+            go.Bar(name='DE Market', x=[selected_tour], y=[k_data['avg_de']], marker_color=OKT_GREY, text=[f"{k_data['avg_de']:.2f}"], textposition='auto')
         ])
-        fig.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', barmode='group', yaxis_range=[0,5.5])
+        style_fig(fig, barmode='group')
         st.plotly_chart(fig, use_container_width=True)
 
     with c2:
@@ -393,14 +606,14 @@ if uploaded_file:
 
         fig2 = go.Figure(data=[
             go.Bar(name='Score', x=[selected_tour], y=[k_data_2['score']], marker_color=OKT_YELLOW),
-            go.Scatter(name='CZ Avg', x=[selected_tour], y=[k_data_2['avg_cz']], mode='markers+lines', marker=dict(color='white', size=15)),
-            go.Scatter(name='DE Avg', x=[selected_tour], y=[k_data_2['avg_de']], mode='markers+lines', marker=dict(color='#666', size=15))
+            go.Scatter(name='CZ Avg', x=[selected_tour], y=[k_data_2['avg_cz']], mode='markers+lines', marker=dict(color=OKT_LIGHT, size=15)),
+            go.Scatter(name='DE Avg', x=[selected_tour], y=[k_data_2['avg_de']], mode='markers+lines', marker=dict(color=OKT_GREY, size=15))
         ])
-        fig2.update_layout(template="plotly_dark", paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', yaxis_range=[0,5.5])
+        style_fig(fig2)
         st.plotly_chart(fig2, use_container_width=True)
 
     # --- 4. FEATURED KPI CARDS ---
-    st.header("🏆 Featured KPI Analysis")
+    st.header("Featured KPI Analysis")
     if final_selected_kpis:
         cols = st.columns(len(final_selected_kpis))
         for i, k in enumerate(final_selected_kpis):
@@ -408,9 +621,9 @@ if uploaded_file:
                 st.markdown(f"""
                     <div class='kpi-card'>
                         <span class='source-tag'>{k['source']}</span>
-                        <p style='color:{OKT_YELLOW}; font-weight:600; margin-top:10px;'>{k['name']}</p>
-                        <h1 style='color:white; margin:5px 0;'>{k['score']:.2f}</h1>
-                        <p style='color:#777; font-size:12px;'>CZ Market: {k['avg_cz']:.2f}<br>DE Market: {k['avg_de']:.2f}</p>
+                        <div class='kpi-name'>{k['name']}</div>
+                        <div class='kpi-score'>{k['score']:.2f}</div>
+                        <div class='kpi-bench'>CZ Market {k['avg_cz']:.2f}<br>DE Market {k['avg_de']:.2f}</div>
                     </div>
                 """, unsafe_allow_html=True)
     else:
@@ -418,18 +631,26 @@ if uploaded_file:
 
     # --- 5. FEEDBACK (GENERAL + VIP) ---
     def render_feedback(label, fb):
-        st.header(f"📝 Qualitative Feedback ({label})")
+        st.header(f"Qualitative Feedback — {label}")
         f_p, f_m = st.columns(2)
         with f_p:
-            st.markdown("<p style='color:#28a745; font-weight:600;'>Positives (+)</p>", unsafe_allow_html=True)
+            st.markdown("<div class='fb-head pos'>Positives</div>", unsafe_allow_html=True)
             for ans, pct in sorted(fb['pos'], key=lambda x: x[1], reverse=True):
-                st.markdown(f"<div class='plus-box'><b>{pct:g}%</b> — {ans}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='fb-row pos'><span class='fb-pct'>{pct:g}%</span>"
+                    f"<span class='fb-text'>{ans}</span></div>",
+                    unsafe_allow_html=True,
+                )
             if not fb['pos']:
                 st.caption("No positive feedback detected for this sheet.")
         with f_m:
-            st.markdown("<p style='color:#dc3545; font-weight:600;'>Negatives (-)</p>", unsafe_allow_html=True)
+            st.markdown("<div class='fb-head neg'>Negatives</div>", unsafe_allow_html=True)
             for ans, pct in sorted(fb['neg'], key=lambda x: x[1], reverse=True):
-                st.markdown(f"<div class='minus-box'><b>{pct:g}%</b> — {ans}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='fb-row neg'><span class='fb-pct'>{pct:g}%</span>"
+                    f"<span class='fb-text'>{ans}</span></div>",
+                    unsafe_allow_html=True,
+                )
             if not fb['neg']:
                 st.caption("No negative feedback detected for this sheet.")
 
@@ -437,5 +658,5 @@ if uploaded_file:
     render_feedback("VIP", feedback['VIP'])
 
 else:
-    st.title("🥊 OKTAGON MMA: Pro AI Analyst")
+    render_brand_header("Survey Analyst")
     st.info("Upload the tournament survey results to generate your executive report.")
